@@ -4,29 +4,24 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use crate::error::Error;
+
 #[allow(clippy::all)]
 #[allow(non_upper_case_globals)]
 #[allow(non_snake_case)]
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-mod bindings {
+mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub(crate) use bindings::{
-    mdb_open, mdb_sql_exit, mdb_sql_fetch_row, mdb_sql_init, mdb_sql_reset, mdb_sql_run_query,
-    MdbFileFlags_MDB_NOFLAGS, MdbSQL, MdbSQLColumn,
-};
-
-use crate::error::Error;
-
-pub struct Mdb(*mut MdbSQL);
+pub(crate) struct Mdb(*mut ffi::MdbSQL);
 
 unsafe impl Send for Mdb {}
 
 impl Drop for Mdb {
     fn drop(&mut self) {
-        unsafe { mdb_sql_exit(self.0) }
+        unsafe { ffi::mdb_sql_exit(self.0) }
     }
 }
 
@@ -40,18 +35,19 @@ impl Mdb {
         let path = path.as_ptr() as *const c_char;
 
         unsafe {
-            let mdb_handle = mdb_open(path, MdbFileFlags_MDB_NOFLAGS);
+            let mdb_handle = ffi::mdb_open(path, ffi::MdbFileFlags_MDB_NOFLAGS);
             if mdb_handle.is_null() {
                 Err(Error::InvalidMdbFile)
             } else {
-                let mdb = mdb_sql_init();
-                (*mdb).mdb = mdb_handle;
-                Ok(Mdb(mdb))
+                let db_ptr = ffi::mdb_sql_init();
+                (*db_ptr).mdb = mdb_handle;
+                Ok(Mdb(db_ptr))
             }
         }
     }
 }
 
+/// A connection to a mdb database.
 pub struct Connection {
     db: Mutex<Mdb>,
 }
@@ -67,58 +63,95 @@ impl Connection {
         self.db
             .lock()
             .map(|guard| run_query(guard, query))?
-            .map(Rows::new)
+            .map(check_error)?
+            .map(Into::into)
     }
 }
 
+/// A handle for rows of query result.
 pub struct Rows<'a> {
     mdb_guard: MutexGuard<'a, Mdb>,
-    columns: Vec<String>,
+    names: Vec<String>,
 }
 
 impl<'a> Rows<'a> {
-    fn new(mdb_guard: MutexGuard<'a, Mdb>) -> Self {
-        let db = (*mdb_guard).0;
+    pub fn names(&self) -> &Vec<String> {
+        &self.names
+    }
+}
+
+impl<'a> From<MutexGuard<'a, Mdb>> for Rows<'a> {
+    fn from(mdb_guard: MutexGuard<'a, Mdb>) -> Self {
+        let db_ptr = (*mdb_guard).0;
 
         let columns = unsafe {
-            let n_cols = (*(*db).columns).len as isize;
-            let cols = (*(*db).columns).pdata as *const *const MdbSQLColumn;
+            let n_cols = (*(*db_ptr).columns).len as isize;
+            let cols = (*(*db_ptr).columns).pdata as *const *const ffi::MdbSQLColumn;
             (0..n_cols)
                 .into_iter()
                 .map(|i| *cols.offset(i))
                 .map(|col| (*col).name)
-                .map(|str| cstr_to_string(str).unwrap())
+                .map(|s| cstr_to_string(s).unwrap())
                 .collect()
         };
 
-        Self { mdb_guard, columns }
-    }
-
-    pub fn columns(&self) -> &Vec<String> {
-        &self.columns
+        Self {
+            mdb_guard,
+            names: columns,
+        }
     }
 }
 
 impl<'a> Iterator for Rows<'a> {
-    type Item = Vec<String>;
+    type Item = Row;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
-            let db = (*self.mdb_guard).0;
-            if mdb_sql_fetch_row(db, (*db).cur_table) == 1 {
-                let n_vals = (*db).num_columns as isize;
-                let vals = (*(*db).bound_values).pdata as *const *const c_char;
-                let string_results = (0..n_vals)
-                    .into_iter()
-                    .map(|i| *vals.offset(i))
-                    .map(|cstr| cstr_to_string(cstr).unwrap())
-                    .collect();
-                Some(string_results)
+            let db_ptr = (*self.mdb_guard).0;
+            if ffi::mdb_sql_fetch_row(db_ptr, (*db_ptr).cur_table) == 1 {
+                let len = (*db_ptr).num_columns as isize;
+                let vals_ptr = (*(*db_ptr).bound_values).pdata as *const *const c_char;
+                Some(Row {
+                    values: (0..len).into_iter().map(|i| *vals_ptr.offset(i)).collect(),
+                })
             } else {
-                mdb_sql_reset(db);
+                ffi::mdb_sql_reset(db_ptr);
                 None
             }
         }
+    }
+}
+
+/// Row of values.
+#[derive(Debug)]
+pub struct Row {
+    values: Vec<*const c_char>,
+}
+
+impl Row {
+    /// Get value at index.
+    pub fn get<T: FromSql>(&self, idx: usize) -> Result<T, Error> {
+        if idx <= self.values.len() {
+            T::column_result(self.values[idx])
+        } else {
+            Err(Error::InvalidRowIndex(idx))
+        }
+    }
+}
+
+pub trait FromSql: Sized {
+    /// Converts SQL value into Rust value.
+    fn column_result(value: *const c_char) -> Result<Self, Error>;
+}
+
+impl<T> FromSql for T
+where
+    T: serde::de::DeserializeOwned,
+{
+    fn column_result(value: *const c_char) -> Result<T, Error> {
+        let value = unsafe { CStr::from_ptr(value) };
+        let value = value.to_str()?.trim();
+        Ok(serde_plain::from_str(value)?)
     }
 }
 
@@ -128,18 +161,18 @@ fn run_query<'a, 'b>(
 ) -> Result<MutexGuard<'a, Mdb>, Error> {
     let query = CString::new(query)?;
     let query = query.as_ptr() as *const c_char;
-    unsafe { mdb_sql_run_query((*mdb_guard).0, query) };
-    check_error(mdb_guard)
+    unsafe { ffi::mdb_sql_run_query((*mdb_guard).0, query) };
+    Ok(mdb_guard)
 }
 
 fn check_error(mdb_guard: MutexGuard<Mdb>) -> Result<MutexGuard<Mdb>, Error> {
-    let db = (*mdb_guard).0;
-    let msg = unsafe { (*db).error_msg };
+    let db_ptr = (*mdb_guard).0;
+    let msg = unsafe { (*db_ptr).error_msg };
     if msg[0] == 0 {
         Ok(mdb_guard)
     } else {
         let e_msg = cstr_to_string(msg.as_ptr())?;
-        unsafe { mdb_sql_reset(db) };
+        unsafe { ffi::mdb_sql_reset(db_ptr) };
         Err(Error::MdbSqlError(e_msg))
     }
 }
@@ -155,39 +188,52 @@ mod test {
     use std::sync::Arc;
     use std::thread;
 
+    #[derive(Debug, PartialEq)]
+    struct Table1 {
+        id: u64,
+        a: String,
+        b: i64,
+        c: f64,
+        d: String,
+        e: u8,
+        f: String,
+    }
+
     #[test]
     fn connection() {
         let conn = Connection::open("resource/test.mdb").unwrap();
-        let rows = conn.prepare("select * from Table1").unwrap();
+        let rows = conn.prepare("select * from Table1 where ID=1").unwrap();
+        let names = rows.names().clone();
+        let tables: Vec<Table1> = rows
+            .into_iter()
+            .map(|r| Table1 {
+                id: r.get(0).unwrap(),
+                a: r.get(1).unwrap(),
+                b: r.get(2).unwrap(),
+                c: r.get(3).unwrap(),
+                d: r.get(4).unwrap(),
+                e: r.get(5).unwrap(),
+                f: r.get(6).unwrap(),
+            })
+            .collect();
 
-        assert_eq!(rows.columns(), &vec!["ID", "A", "B", "C", "D", "E", "F"]);
+        assert_eq!(names, vec!["ID", "A", "B", "C", "D", "E", "F"]);
         assert_eq!(
-            rows.into_iter().collect::<Vec<_>>(),
-            vec![
-                vec![
-                    "1",
-                    "Foo",
-                    "1",
-                    "1.0000",
-                    "01/01/00 00:00:00",
-                    "1",
-                    "<div><font face=Calibri>FooBar</font></div>"
-                ],
-                vec![
-                    "2",
-                    "fOO",
-                    "100",
-                    "99.0000",
-                    "01/01/99 00:00:00",
-                    "0",
-                    "<div><font face=Calibri>FOOBARBAZ</font></div>"
-                ],
-            ]
+            tables[0],
+            Table1 {
+                id: 1,
+                a: "Foo".to_string(),
+                b: 1,
+                c: 1.0000,
+                d: "01/01/00 00:00:00".to_string(),
+                e: 1,
+                f: "<div><font face=Calibri>FooBar</font></div>".to_string()
+            }
         );
     }
 
     #[test]
-    fn mutex() {
+    fn multithreading() {
         let conn = Arc::new(Connection::open("resource/test.mdb").unwrap());
 
         let cap = 1000;
@@ -198,17 +244,21 @@ mod test {
             threads.push(thread::spawn(move || {
                 if i % 2 == 0 {
                     let rows = conn_clone.prepare("select ID from Table1").unwrap();
-                    assert_eq!(rows.columns(), &vec!["ID"]);
+                    assert_eq!(rows.names(), &vec!["ID"]);
                     assert_eq!(
-                        rows.into_iter().collect::<Vec<_>>(),
-                        vec![vec!["1"], vec!["2"]]
+                        rows.into_iter()
+                            .map(|r| r.get(0).unwrap())
+                            .collect::<Vec<u32>>(),
+                        vec![1, 2]
                     );
                 } else {
                     let rows = conn_clone.prepare("select E from Table1").unwrap();
-                    assert_eq!(rows.columns(), &vec!["E"]);
+                    assert_eq!(rows.names(), &vec!["E"]);
                     assert_eq!(
-                        rows.into_iter().collect::<Vec<_>>(),
-                        vec![vec!["1"], vec!["0"]]
+                        rows.into_iter()
+                            .map(|r| r.get(0).unwrap())
+                            .collect::<Vec<u8>>(),
+                        vec![1, 0]
                     );
                 }
             }));

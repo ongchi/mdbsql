@@ -2,11 +2,19 @@
 name = "mdbsql"
 version = "0.1.0"
 edition = "2021"
+description = "SQL query for Access database on Unix-like systems"
+readme = "README.md"
+keywords = ["access", "mdb", "database", "ffi"]
+license = "Apache-2.0"
+categories = ["database"]
+repository = "https://github.com/ongchi/mdbsql"
 
 [lib]
 name = "mdbsql"
 
 [dependencies]
+serde = "1.0"
+serde_plain = "1.0"
 thiserror = "1.0"
 
 [build-dependencies]
