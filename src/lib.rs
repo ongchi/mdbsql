@@ -14,9 +14,13 @@
 //! # let path = "./resource/test.mdb";
 //! let conn = Connection::open(path)?;
 //! let rows = conn.prepare("SELECT ID, A FROM Table1 WHERE ID = 1")?;
-//! let col_names = rows.names();
+//! let col_names: Vec<String> = rows
+//!     .columns()
+//!     .iter()
+//!     .map(|c| c.name())
+//!     .collect();
 //!
-//! assert_eq!(col_names, &vec!["ID", "A"]);
+//! assert_eq!(col_names, vec!["ID", "A"]);
 //!
 //! for row in rows {
 //!     let col1: u32 = row.get(0)?;
@@ -29,6 +33,7 @@
 //! ````
 #[deny(missing_docs)]
 mod error;
+mod ffi;
 pub mod mdbsql;
 
 pub use crate::error::Error;

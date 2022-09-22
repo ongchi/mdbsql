@@ -1,6 +1,6 @@
 use std::sync::{MutexGuard, PoisonError};
 
-use crate::mdbsql::Mdb;
+use crate::ffi::Mdb;
 
 /// Enum listing for errors from mdbsql.
 #[derive(thiserror::Error, Debug)]
