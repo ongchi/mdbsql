@@ -2,8 +2,10 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-link-lib=dylib=mdb");
-    println!("cargo:rustc-link-lib=dylib=mdbsql");
+    if env::var("DOCS_RS").is_err() {
+        println!("cargo:rustc-link-lib=dylib=mdb");
+        println!("cargo:rustc-link-lib=dylib=mdbsql");
+    }
 
     let library = pkg_config::probe_library("glib-2.0").unwrap_or_else(|e| panic!("{}", e));
 

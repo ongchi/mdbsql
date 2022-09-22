@@ -9,6 +9,9 @@ license = "Apache-2.0"
 categories = ["database"]
 repository = "https://github.com/ongchi/mdbsql"
 
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
 [lib]
 name = "mdbsql"
 
