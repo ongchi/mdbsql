@@ -2,12 +2,10 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    if env::var("DOCS_RS").is_err() {
-        println!("cargo:rustc-link-lib=dylib=mdb");
-        println!("cargo:rustc-link-lib=dylib=mdbsql");
-    }
+    println!("cargo:rustc-link-lib=dylib=mdb");
+    println!("cargo:rustc-link-lib=dylib=mdbsql");
 
-    let library = pkg_config::probe_library("glib-2.0").unwrap_or_else(|e| panic!("{}", e));
+    let library = pkg_config::probe_library("libmdbsql").unwrap_or_else(|e| panic!("{}", e));
 
     let bindings = bindgen::Builder::default()
         .clang_args(
@@ -16,6 +14,13 @@ fn main() {
                 .iter()
                 .map(|path| format!("-I{}", path.to_string_lossy())),
         )
+        .clang_args(
+            library
+                .link_paths
+                .iter()
+                .map(|path| format!("-L{}", path.to_string_lossy())),
+        )
+        .clang_arg("-D HAVE_GLIB=1")
         .header("src/wrapper.h")
         .allowlist_file(r".*mdbtools\.h")
         .allowlist_file(r".*mdbsql\.h")
