@@ -2,9 +2,6 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-link-lib=dylib=mdb");
-    println!("cargo:rustc-link-lib=dylib=mdbsql");
-
     let library = pkg_config::probe_library("libmdbsql").unwrap_or_else(|e| panic!("{}", e));
 
     let bindings = bindgen::Builder::default()
