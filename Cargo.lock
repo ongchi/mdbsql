@@ -192,6 +192,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "libmdb-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "pkg-config",
+]
+
+[[package]]
 name = "log"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -204,8 +212,7 @@ dependencies = [
 name = "mdbsql"
 version = "0.1.2"
 dependencies = [
- "bindgen",
- "pkg-config",
+ "libmdb-sys",
  "serde",
  "serde_plain",
  "thiserror",

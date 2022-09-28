@@ -3,17 +3,12 @@ use std::os::raw::c_char;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::error::Error;
+use libmdb_sys::{
+    mdb_open, mdb_sql_exit, mdb_sql_fetch_row, mdb_sql_init, mdb_sql_reset, mdb_sql_run_query,
+    MdbFileFlags_MDB_NOFLAGS, MdbSQL, MdbSQLColumn,
+};
 
-#[allow(clippy::all)]
-#[allow(non_upper_case_globals)]
-#[allow(non_snake_case)]
-#[allow(non_camel_case_types)]
-#[allow(dead_code)]
-mod bindings {
-    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-}
-use bindings::*;
+use crate::error::Error;
 
 #[derive(Debug)]
 pub struct Value(*const c_char);
