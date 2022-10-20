@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "mdbsql"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libmdb-sys",
  "serde",
