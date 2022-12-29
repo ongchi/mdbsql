@@ -4,9 +4,10 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::error::Error;
-use crate::ffi::{Column, Mdb, Value};
+use crate::ffi::{Mdb, SqlColumn, SqlValue};
 
 /// A connection to a mdb database.
+#[derive(Debug)]
 pub struct Connection {
     db: Mutex<Mdb>,
 }
@@ -23,7 +24,7 @@ impl Connection {
 
         let query = CString::new(query)?;
         let query = query.as_ptr() as *const c_char;
-        guard.run_query(query);
+        guard.sql_run_query(query);
 
         match guard.error_msg() {
             None => Ok(guard.into()),
@@ -35,18 +36,18 @@ impl Connection {
 /// A handle for rows of query result.
 pub struct Rows<'mdb> {
     mdb_guard: MutexGuard<'mdb, Mdb>,
-    columns: Vec<Column>,
+    columns: Vec<SqlColumn>,
 }
 
 impl<'mdb> Rows<'mdb> {
-    pub fn columns(&self) -> &Vec<Column> {
+    pub fn columns(&self) -> &Vec<SqlColumn> {
         &self.columns
     }
 }
 
 impl<'mdb> From<MutexGuard<'mdb, Mdb>> for Rows<'mdb> {
     fn from(mdb_guard: MutexGuard<'mdb, Mdb>) -> Self {
-        let columns = mdb_guard.columns();
+        let columns = mdb_guard.sql_columns();
         Self { mdb_guard, columns }
     }
 }
@@ -55,8 +56,8 @@ impl<'mdb> Iterator for Rows<'mdb> {
     type Item = Row;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.mdb_guard.fetch_row() {
-            let values = self.mdb_guard.bound_values();
+        if self.mdb_guard.sql_fetch_row() {
+            let values = self.mdb_guard.sql_bound_values();
             Some(Row { values })
         } else {
             self.mdb_guard.reset();
@@ -67,7 +68,7 @@ impl<'mdb> Iterator for Rows<'mdb> {
 
 /// Row of values.
 pub struct Row {
-    values: Vec<Value>,
+    values: Vec<SqlValue>,
 }
 
 impl Row {

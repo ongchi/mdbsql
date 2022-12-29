@@ -35,6 +35,8 @@
 mod error;
 mod ffi;
 pub mod mdbsql;
+#[cfg(feature = "rusqlite")]
+mod rusqlite;
 
 pub use crate::error::Error;
 pub use crate::mdbsql::Connection;

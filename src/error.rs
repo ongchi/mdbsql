@@ -1,4 +1,7 @@
-use std::sync::{MutexGuard, PoisonError};
+use std::{
+    path::PathBuf,
+    sync::{MutexGuard, PoisonError},
+};
 
 use crate::ffi::Mdb;
 
@@ -6,12 +9,12 @@ use crate::ffi::Mdb;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Error when given path is not a file.
-    #[error("invalid path")]
-    InvalidPath,
+    #[error("invalid path: {0}")]
+    InvalidPath(PathBuf),
 
     /// Error when given path is not a valid mdb file.
-    #[error("invalid mdb file")]
-    InvalidMdbFile,
+    #[error("invalid mdb file: {0}")]
+    InvalidMdbFile(PathBuf),
 
     /// Error from libmdbsql
     #[error("{0}")]
@@ -41,5 +44,23 @@ pub enum Error {
 impl From<PoisonError<MutexGuard<'_, Mdb>>> for Error {
     fn from(error: PoisonError<MutexGuard<Mdb>>) -> Self {
         Self::MutexPoisonError(error.to_string())
+    }
+}
+
+#[cfg(feature = "rusqlite")]
+impl From<Error> for rusqlite::Error {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::InvalidPath(p) => Self::InvalidPath(p),
+            Error::NulError(e) => Self::NulError(e),
+            Error::Utf8Error(e) => Self::Utf8Error(e),
+            err => Self::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::Unknown,
+                    extended_code: 0,
+                },
+                Some(err.to_string()),
+            ),
+        }
     }
 }
