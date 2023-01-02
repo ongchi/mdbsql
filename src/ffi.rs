@@ -1,5 +1,5 @@
 use glib_sys::{g_free, GPtrArray};
-use libc::{c_char, c_int, c_void, size_t};
+use libc::{c_char, c_int, size_t};
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::os::unix::ffi::OsStrExt;
@@ -8,40 +8,60 @@ use std::ptr;
 use std::string::ToString;
 
 use libmdb_sys::{
-    mdb_bind_column, mdb_fetch_row, mdb_is_system_table, mdb_normalise_and_replace,
-    mdb_ole_read_full, mdb_open, mdb_print_col, mdb_print_schema, mdb_read_catalog,
-    mdb_read_columns, mdb_read_table_by_name, mdb_rewind_table, mdb_set_bind_size,
-    mdb_set_default_backend, mdb_sql_exit, mdb_sql_fetch_row, mdb_sql_init, mdb_sql_reset,
-    mdb_sql_run_query, MdbCatalogEntry, MdbColumn, MdbFileFlags_MDB_NOFLAGS, MdbSQL, MdbSQLColumn,
-    MdbTableDef, MDB_OLE, MDB_SHEXP_BULK_INSERT, MDB_SHEXP_INDEXES, MDB_SHEXP_RELATIONS, MDB_TABLE,
+    mdb_bind_column, mdb_fetch_row, mdb_is_system_table, mdb_ole_read_full, mdb_open,
+    mdb_print_col, mdb_print_schema, mdb_read_catalog, mdb_read_columns, mdb_read_table_by_name,
+    mdb_rewind_table, mdb_set_bind_size, mdb_set_default_backend, mdb_sql_exit, mdb_sql_fetch_row,
+    mdb_sql_init, mdb_sql_reset, mdb_sql_run_query, MdbCatalogEntry, MdbColumn,
+    MdbFileFlags_MDB_NOFLAGS, MdbSQL, MdbSQLColumn, MdbTableDef, MDB_OLE, MDB_SHEXP_BULK_INSERT,
+    MDB_SHEXP_INDEXES, MDB_SHEXP_RELATIONS, MDB_TABLE,
 };
+
+#[cfg(LIBMDBSQL_GE_VERSION_1)]
+use libmdb_sys::mdb_normalise_and_replace;
 
 use crate::error::Error;
 
 const EXPORT_BIND_SIZE: size_t = 200000;
 
 struct PtrArray<T> {
-    arr: GPtrArray,
-    idx: u32,
+    arr: *mut GPtrArray,
     _marker: PhantomData<T>,
 }
 
-impl<T> From<GPtrArray> for PtrArray<T> {
-    fn from(value: GPtrArray) -> Self {
+impl<T> From<*mut GPtrArray> for PtrArray<T> {
+    fn from(value: *mut GPtrArray) -> Self {
         Self {
             arr: value,
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<'a, T> IntoIterator for &'a PtrArray<T> {
+    type Item = *const T;
+    type IntoIter = PtrArrayIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PtrArrayIter {
+            arr: self.arr,
             idx: 0,
             _marker: Default::default(),
         }
     }
 }
 
-impl<T> Iterator for PtrArray<T> {
+struct PtrArrayIter<T> {
+    arr: *mut GPtrArray,
+    idx: u32,
+    _marker: PhantomData<T>,
+}
+
+impl<T> Iterator for PtrArrayIter<T> {
     type Item = *const T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx < self.arr.len {
-            let arr = self.arr.pdata as *const *const T;
+        if self.idx < unsafe { *self.arr }.len {
+            let arr = unsafe { *self.arr }.pdata as *const *const T;
             let data = unsafe { *arr.offset(self.idx as isize) };
             self.idx += 1;
             Some(data)
@@ -109,10 +129,9 @@ impl Mdb {
     pub fn table_names(&self) -> Vec<String> {
         unsafe {
             let mdb = (*self.0).mdb;
-            mdb_read_catalog(mdb, 1);
+            mdb_read_catalog(mdb, MDB_TABLE);
 
-            let catalogs: PtrArray<MdbCatalogEntry> = (*(*mdb).catalog).into();
-            catalogs
+            Into::<PtrArray<MdbCatalogEntry>>::into((*mdb).catalog)
                 .into_iter()
                 .filter(|e| mdb_is_system_table(*e as _) == 0)
                 .map(|e| (*e).object_name)
@@ -123,17 +142,17 @@ impl Mdb {
 
     /// Columns for current table
     pub fn sql_columns(&self) -> Vec<SqlColumn> {
-        unsafe {
-            let columns: PtrArray<MdbSQLColumn> = (*(*self.0).columns).into();
-            columns.into_iter().map(SqlColumn).collect()
-        }
+        unsafe { Into::<PtrArray<MdbSQLColumn>>::into((*self.0).columns) }
+            .into_iter()
+            .map(SqlColumn)
+            .collect()
     }
 
     pub fn sql_bound_values(&self) -> Vec<SqlValue> {
-        unsafe {
-            let values: PtrArray<c_char> = (*(*self.0).bound_values).into();
-            values.into_iter().map(SqlValue).collect()
-        }
+        unsafe { Into::<PtrArray<c_char>>::into((*self.0).bound_values) }
+            .into_iter()
+            .map(SqlValue)
+            .collect()
     }
 
     pub fn sql_run_query(&self, query: *const c_char) {
@@ -231,45 +250,56 @@ impl Mdb {
             let mdb = (*self.0).mdb;
 
             let mut bound_values = vec![];
+
             for i in 1..=(*table).num_cols {
-                let bind_ptr = glib_sys::g_malloc0(EXPORT_BIND_SIZE) as *mut c_void;
-                let len_ptr =
-                    glib_sys::g_malloc(std::mem::size_of::<c_int>() as size_t) as *mut c_int;
+                let mut bind_value = vec![0u8; EXPORT_BIND_SIZE];
+                let mut bind_len = 0;
 
-                mdb_bind_column(table, i as c_int, bind_ptr, len_ptr);
+                mdb_bind_column(
+                    table,
+                    i as c_int,
+                    bind_value.as_mut_ptr() as _,
+                    &mut bind_len,
+                );
 
-                bound_values.push((bind_ptr, len_ptr));
+                bound_values.push((bind_value, bind_len));
             }
 
             let mut buf: *mut c_char = ptr::null_mut();
             let mut buf_sizeloc: size_t = 0;
             let mem_fd = libc::open_memstream(&mut buf, &mut buf_sizeloc);
 
-            let backend = (*mdb).default_backend;
+            #[cfg(LIBMDBSQL_GE_VERSION_1)]
+            let normalize =
+                |mut name| -> *mut i8 { mdb_normalise_and_replace(mdb, &mut name as _) };
+            #[cfg(not(LIBMDBSQL_GE_VERSION_1))]
+            let normalize = |name| -> *mut i8 { name };
+
+            let quote = |name| -> *mut i8 {
+                let quote = (*(*mdb).default_backend).quote_schema_name.unwrap();
+                normalize(quote(ptr::null(), name as _))
+            };
 
             while mdb_fetch_row(table) == 1 {
-                let mut quoted_name =
-                    (*backend).quote_schema_name.unwrap()(ptr::null(), table_name.as_ptr() as _);
-                quoted_name = mdb_normalise_and_replace(mdb, &mut quoted_name);
+                let quoted_name = quote((*table).name.as_ptr());
                 libc::fputs("INSERT INTO \0".as_ptr() as _, mem_fd);
                 libc::fputs(quoted_name, mem_fd);
                 libc::fputs(" (\0".as_ptr() as _, mem_fd);
                 g_free(quoted_name as _);
 
-                let cols: PtrArray<MdbColumn> = (*(*(table)).columns).into();
-                for (i, c) in cols.enumerate() {
+                let cols: PtrArray<MdbColumn> = (*table).columns.into();
+
+                for (i, c) in cols.into_iter().enumerate() {
                     if i > 0 {
                         libc::fputs(", \0".as_ptr() as _, mem_fd);
                     }
-                    let mut quoted_name = (*c).name.as_ptr() as _;
-                    quoted_name = mdb_normalise_and_replace(mdb, &mut quoted_name as _);
-                    libc::fputs(quoted_name, mem_fd);
+                    let quoted_name = (*c).name.as_ptr() as _;
+                    libc::fputs(normalize(quoted_name), mem_fd);
                 }
 
                 libc::fputs(") VALUES (\0".as_ptr() as _, mem_fd);
 
-                let cols: PtrArray<MdbColumn> = (*(*(table)).columns).into();
-                for (i, c) in cols.enumerate() {
+                for (i, c) in cols.into_iter().enumerate() {
                     let col_type = (*c).col_type;
 
                     let (value, length) = if col_type == MDB_OLE as i32 {
@@ -277,7 +307,10 @@ impl Mdb {
                         let bind_ptr = mdb_ole_read_full(mdb, c as _, len_ptr);
                         (bind_ptr, len_ptr as *mut i32)
                     } else {
-                        bound_values[i]
+                        (
+                            bound_values[i].0.as_mut_ptr() as _,
+                            &mut bound_values[i].1 as _,
+                        )
                     };
 
                     if i > 0 {
@@ -303,10 +336,6 @@ impl Mdb {
             let stmt = CStr::from_ptr(buf as _).to_str()?.to_string();
 
             g_free(buf as _);
-            for (v_ptr, i_ptr) in bound_values {
-                g_free(v_ptr);
-                g_free(i_ptr as _);
-            }
 
             Ok(stmt)
         }

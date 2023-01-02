@@ -298,10 +298,12 @@ dependencies = [
  "glib-sys",
  "libc",
  "libmdb-sys",
+ "pkg-config",
  "rusqlite",
  "serde",
  "serde_plain",
  "thiserror",
+ "version-compare",
 ]
 
 [[package]]
