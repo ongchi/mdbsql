@@ -28,7 +28,6 @@ fn main() {
         .blocklist_type(r".*__sFILEX")
         .blocklist_type(r".*__sbuf")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        .rustfmt_bindings(true)
         .trust_clang_mangling(false)
         .generate()
         .expect("Unable to generate bindings");

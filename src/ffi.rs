@@ -194,7 +194,7 @@ impl Mdb {
         }
     }
 
-    pub fn set_bind_size(&self, bind_size: u64) {
+    pub fn set_bind_size(&self, bind_size: usize) {
         unsafe {
             mdb_set_bind_size((*self.0).mdb, bind_size);
         }
@@ -242,7 +242,7 @@ impl Mdb {
         let quote_text = 1;
         let export_flags = 0;
 
-        self.set_bind_size(EXPORT_BIND_SIZE as u64);
+        self.set_bind_size(EXPORT_BIND_SIZE as usize);
 
         let table = self.read_table(table_name)?;
 
