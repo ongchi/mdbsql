@@ -60,9 +60,15 @@ impl<'mdb> Iterator for Rows<'mdb> {
             let values = self.mdb_guard.sql_bound_values();
             Some(Row { values })
         } else {
-            self.mdb_guard.reset();
             None
         }
+    }
+}
+
+impl<'mdb> Drop for Rows<'mdb> {
+    fn drop(&mut self) {
+        // reset query results when drop
+        self.mdb_guard.reset()
     }
 }
 
