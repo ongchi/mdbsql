@@ -1,6 +1,6 @@
 [package]
 name = "mdbsql"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "SQL query for Access database on Unix-like systems"
 readme = "README.md"
