@@ -21,7 +21,7 @@ use libmdb_sys::mdb_normalise_and_replace;
 
 use crate::error::Error;
 
-const EXPORT_BIND_SIZE: size_t = 200000;
+const EXPORT_BIND_SIZE: usize = 200000;
 
 struct PtrArray<T> {
     arr: *mut GPtrArray,
@@ -242,7 +242,7 @@ impl Mdb {
         let quote_text = 1;
         let export_flags = 0;
 
-        self.set_bind_size(EXPORT_BIND_SIZE as usize);
+        self.set_bind_size(EXPORT_BIND_SIZE);
 
         let table = self.read_table(table_name)?;
 
