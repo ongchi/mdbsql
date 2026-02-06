@@ -19,7 +19,7 @@ impl Connection {
         })
     }
 
-    pub fn prepare(&self, query: &str) -> Result<Rows, Error> {
+    pub fn prepare(&self, query: &str) -> Result<Rows<'_>, Error> {
         let guard = self.db.lock()?;
 
         let query = CString::new(query)?;
@@ -149,6 +149,95 @@ mod test {
                 e: 1,
                 f: "<div><font face=Calibri>FooBar</font></div>".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn open_nonexistent_path() {
+        let err = Connection::open("resource/nonexistent.mdb").unwrap_err();
+        assert!(matches!(err, Error::InvalidPath(_)));
+    }
+
+    #[test]
+    fn open_invalid_mdb_file() {
+        // A non-mdb file that exists
+        let err = Connection::open("Cargo.toml").unwrap_err();
+        assert!(matches!(err, Error::InvalidMdbFile(_)));
+    }
+
+    #[test]
+    fn invalid_sql_query() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+        let result = conn.prepare("SELECT * FROM NonExistentTable");
+        assert!(matches!(result, Err(Error::MdbSqlError(_))));
+    }
+
+    #[test]
+    fn invalid_row_index() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+        let rows = conn.prepare("select ID from Table1 where ID=1").unwrap();
+        let row = rows.into_iter().next().unwrap();
+        let err = row.get::<u32>(99).unwrap_err();
+        assert!(matches!(err, Error::InvalidRowIndex(99)));
+    }
+
+    #[test]
+    fn type_conversion_error() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+        let rows = conn.prepare("select A from Table1 where ID=1").unwrap();
+        for row in rows {
+            // Column A is "Foo", which cannot be parsed as u32
+            let err = row.get::<u32>(0).unwrap_err();
+            assert!(
+                matches!(err, Error::FromSqlError(_)),
+                "expected FromSqlError, got: {:?}",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn sequential_queries() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+
+        // First query
+        {
+            let rows = conn.prepare("select ID from Table1 where ID=1").unwrap();
+            let ids: Vec<u32> = rows.map(|r| r.get(0).unwrap()).collect();
+            assert_eq!(ids, vec![1]);
+        }
+        // Rows dropped, query state reset — second query should work
+        {
+            let rows = conn.prepare("select ID from Table1 where ID=2").unwrap();
+            let ids: Vec<u32> = rows.map(|r| r.get(0).unwrap()).collect();
+            assert_eq!(ids, vec![2]);
+        }
+    }
+
+    #[test]
+    fn select_all_rows() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+        let rows = conn.prepare("select ID from Table1").unwrap();
+        let ids: Vec<u32> = rows.map(|r| r.get(0).unwrap()).collect();
+        assert_eq!(ids, vec![1, 2]);
+    }
+
+    #[test]
+    fn empty_result_set() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+        let rows = conn.prepare("select ID from Table1 where ID=999").unwrap();
+        let ids: Vec<u32> = rows.map(|r| r.get(0).unwrap()).collect();
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn column_count() {
+        let conn = Connection::open("resource/test.mdb").unwrap();
+        let rows = conn.prepare("select ID, A, B from Table1").unwrap();
+        assert_eq!(rows.columns().len(), 3);
+        assert_eq!(
+            rows.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+            vec!["ID", "A", "B"]
         );
     }
 

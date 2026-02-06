@@ -37,7 +37,7 @@ impl<T> From<*mut GPtrArray> for PtrArray<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a PtrArray<T> {
+impl<T> IntoIterator for &PtrArray<T> {
     type Item = *const T;
     type IntoIter = PtrArrayIter<T>;
 
@@ -282,22 +282,22 @@ impl Mdb {
 
             while mdb_fetch_row(table) == 1 {
                 let quoted_name = quote((*table).name.as_ptr());
-                libc::fputs("INSERT INTO \0".as_ptr() as _, mem_fd);
+                libc::fputs(c"INSERT INTO ".as_ptr(), mem_fd);
                 libc::fputs(quoted_name, mem_fd);
-                libc::fputs(" (\0".as_ptr() as _, mem_fd);
+                libc::fputs(c" (".as_ptr(), mem_fd);
                 g_free(quoted_name as _);
 
                 let cols: PtrArray<MdbColumn> = (*table).columns.into();
 
                 for (i, c) in cols.into_iter().enumerate() {
                     if i > 0 {
-                        libc::fputs(", \0".as_ptr() as _, mem_fd);
+                        libc::fputs(c", ".as_ptr(), mem_fd);
                     }
                     let quoted_name = (*c).name.as_ptr() as _;
                     libc::fputs(normalize(quoted_name), mem_fd);
                 }
 
-                libc::fputs(") VALUES (\0".as_ptr() as _, mem_fd);
+                libc::fputs(c") VALUES (".as_ptr(), mem_fd);
 
                 for (i, c) in cols.into_iter().enumerate() {
                     let col_type = (*c).col_type;
@@ -314,7 +314,7 @@ impl Mdb {
                     };
 
                     if i > 0 {
-                        libc::fputs(",\0".as_ptr() as _, mem_fd);
+                        libc::fputs(c",".as_ptr(), mem_fd);
                     }
 
                     mdb_print_col(
@@ -323,12 +323,12 @@ impl Mdb {
                         quote_text,
                         col_type,
                         *length,
-                        "\"\0".as_ptr() as _,
+                        c"\"".as_ptr() as _,
                         ptr::null_mut(),
                         export_flags,
                     );
                 }
-                libc::fputs(");\0".as_ptr() as _, mem_fd);
+                libc::fputs(c");".as_ptr(), mem_fd);
             }
 
             libc::fclose(mem_fd);

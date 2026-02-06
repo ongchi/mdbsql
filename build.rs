@@ -1,6 +1,8 @@
 use version_compare::Version;
 
 fn main() {
+    println!("cargo::rustc-check-cfg=cfg(LIBMDBSQL_GE_VERSION_1)");
+
     let library = pkg_config::probe_library("libmdbsql").unwrap_or_else(|e| panic!("{}", e));
     let v1_0 = Version::from("1.0.0").unwrap();
     let current_version = Version::from(&library.version).unwrap();
