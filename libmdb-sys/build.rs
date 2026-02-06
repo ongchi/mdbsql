@@ -27,7 +27,7 @@ fn main() {
         .blocklist_type(r".*FILE")
         .blocklist_type(r".*__sFILEX")
         .blocklist_type(r".*__sbuf")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .trust_clang_mangling(false)
         .generate()
         .expect("Unable to generate bindings");

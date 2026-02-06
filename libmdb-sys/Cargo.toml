@@ -8,9 +8,9 @@ keywords = ["libmdb", "libmdbsql", "ffi"]
 categories = ["external-ffi-bindings"]
 
 [build-dependencies]
-bindgen = "0.65"
+bindgen = "0.72"
 pkg-config = "0.3"
 
 [dependencies]
-glib-sys = "0.16"
+glib-sys = "0.21"
 libc = "0.2"

@@ -18,7 +18,7 @@ pub trait OpenMdb {
             conn.execute(&schema, ())?;
 
             let stmt = dbg!(mdb.export(table)?);
-            conn.execute(&stmt, ())?;
+            conn.execute_batch(&stmt)?;
         }
 
         Ok(conn)
@@ -33,7 +33,7 @@ mod test {
 
     #[derive(Debug, PartialEq)]
     struct Table1 {
-        id: u64,
+        id: i64,
         a: String,
         b: i64,
         c: f64,
