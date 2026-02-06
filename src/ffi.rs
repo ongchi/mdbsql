@@ -5,7 +5,6 @@ use std::marker::PhantomData;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
-use std::string::ToString;
 
 use libmdb_sys::{
     mdb_bind_column, mdb_fetch_row, mdb_is_system_table, mdb_ole_read_full, mdb_open,
@@ -32,7 +31,7 @@ impl<T> From<*mut GPtrArray> for PtrArray<T> {
     fn from(value: *mut GPtrArray) -> Self {
         Self {
             arr: value,
-            _marker: Default::default(),
+            _marker: PhantomData,
         }
     }
 }
@@ -45,7 +44,7 @@ impl<T> IntoIterator for &PtrArray<T> {
         PtrArrayIter {
             arr: self.arr,
             idx: 0,
-            _marker: Default::default(),
+            _marker: PhantomData,
         }
     }
 }
@@ -131,7 +130,7 @@ impl Mdb {
             let mdb = (*self.0).mdb;
             mdb_read_catalog(mdb, MDB_TABLE);
 
-            Into::<PtrArray<MdbCatalogEntry>>::into((*mdb).catalog)
+            PtrArray::<MdbCatalogEntry>::from((*mdb).catalog)
                 .into_iter()
                 .filter(|e| mdb_is_system_table(*e as _) == 0)
                 .map(|e| (*e).object_name)
@@ -142,14 +141,14 @@ impl Mdb {
 
     /// Columns for current table
     pub fn sql_columns(&self) -> Vec<SqlColumn> {
-        unsafe { Into::<PtrArray<MdbSQLColumn>>::into((*self.0).columns) }
+        unsafe { PtrArray::<MdbSQLColumn>::from((*self.0).columns) }
             .into_iter()
             .map(SqlColumn)
             .collect()
     }
 
     pub fn sql_bound_values(&self) -> Vec<SqlValue> {
-        unsafe { Into::<PtrArray<c_char>>::into((*self.0).bound_values) }
+        unsafe { PtrArray::<c_char>::from((*self.0).bound_values) }
             .into_iter()
             .map(SqlValue)
             .collect()
@@ -215,8 +214,6 @@ impl Mdb {
 
             libc::fclose(mem_fd);
             let schema = CStr::from_ptr(buf as _).to_str().unwrap().to_string();
-
-            g_free(namespace as _);
 
             Ok(schema)
         }

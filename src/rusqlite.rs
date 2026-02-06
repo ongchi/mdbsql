@@ -14,10 +14,10 @@ pub trait OpenMdb {
 
         mdb.set_default_backend("sqlite")?;
         for table in &tables {
-            let schema = dbg!(mdb.schema(table)?);
+            let schema = mdb.schema(table)?;
             conn.execute(&schema, ())?;
 
-            let stmt = dbg!(mdb.export(table)?);
+            let stmt = mdb.export(table)?;
             conn.execute_batch(&stmt)?;
         }
 

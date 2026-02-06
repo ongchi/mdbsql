@@ -40,7 +40,7 @@ pub struct Rows<'mdb> {
 }
 
 impl<'mdb> Rows<'mdb> {
-    pub fn columns(&self) -> &Vec<SqlColumn> {
+    pub fn columns(&self) -> &[SqlColumn] {
         &self.columns
     }
 }
