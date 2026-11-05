@@ -21,9 +21,9 @@ members = ["libmdb-sys"]
 [features]
 default = []
 rusqlite = ["dep:rusqlite"]
+bundled = ["libmdb-sys/bundled"]
 
 [build-dependencies]
-pkg-config = "0.3"
 version-compare = "0.2"
 
 [dependencies]

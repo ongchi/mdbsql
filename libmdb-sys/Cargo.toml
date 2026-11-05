@@ -3,12 +3,18 @@ name = "libmdb-sys"
 version = "0.1.2"
 edition = "2021"
 description = "Native bindings to the libmdb/libmdbsql library"
-license = "Apache-2.0"
+license = "Apache-2.0 AND LGPL-2.0-or-later"
 keywords = ["libmdb", "libmdbsql", "ffi"]
 categories = ["external-ffi-bindings"]
+links = "mdbsql"
+
+[features]
+default = []
+bundled = ["dep:cc"]
 
 [build-dependencies]
 bindgen = "0.72"
+cc = { version = "1.2", optional = true }
 pkg-config = "0.3"
 
 [dependencies]
