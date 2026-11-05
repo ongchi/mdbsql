@@ -195,7 +195,6 @@ version = "0.1.7"
 dependencies = [
  "libc",
  "libmdb-sys",
- "pkg-config",
  "rusqlite",
  "serde",
  "serde_plain",
