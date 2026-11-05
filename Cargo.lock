@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "libmdb-sys"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "mdbsql"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "libc",
  "libmdb-sys",
