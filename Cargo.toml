@@ -27,7 +27,6 @@ bundled = ["libmdb-sys/bundled"]
 version-compare = "0.2"
 
 [dependencies]
-glib-sys = "0.21"
 libc = "0.2"
 libmdb-sys = { version = "0.1.2", path = "libmdb-sys" }
 pkg-config = "0.3"

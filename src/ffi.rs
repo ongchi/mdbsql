@@ -1,4 +1,3 @@
-use glib_sys::{g_free, GPtrArray};
 use libc::{c_char, c_int, size_t};
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
@@ -10,7 +9,7 @@ use libmdb_sys::{
     mdb_bind_column, mdb_fetch_row, mdb_is_system_table, mdb_ole_read_full, mdb_open,
     mdb_print_col, mdb_print_schema, mdb_read_catalog, mdb_read_columns, mdb_read_table_by_name,
     mdb_rewind_table, mdb_set_bind_size, mdb_set_default_backend, mdb_sql_exit, mdb_sql_fetch_row,
-    mdb_sql_init, mdb_sql_reset, mdb_sql_run_query, MdbCatalogEntry, MdbColumn,
+    mdb_sql_init, mdb_sql_reset, mdb_sql_run_query, GPtrArray, MdbCatalogEntry, MdbColumn,
     MdbFileFlags_MDB_NOFLAGS, MdbSQL, MdbSQLColumn, MdbTableDef, MDB_OLE, MDB_SHEXP_BULK_INSERT,
     MDB_SHEXP_INDEXES, MDB_SHEXP_RELATIONS, MDB_TABLE,
 };
@@ -282,7 +281,7 @@ impl Mdb {
                 libc::fputs(c"INSERT INTO ".as_ptr(), mem_fd);
                 libc::fputs(quoted_name, mem_fd);
                 libc::fputs(c" (".as_ptr(), mem_fd);
-                g_free(quoted_name as _);
+                libc::free(quoted_name as _);
 
                 let cols: PtrArray<MdbColumn> = (*table).columns.into();
 
@@ -332,7 +331,7 @@ impl Mdb {
 
             let stmt = CStr::from_ptr(buf as _).to_str()?.to_string();
 
-            g_free(buf as _);
+            libc::free(buf as _);
 
             Ok(stmt)
         }

@@ -31,25 +31,23 @@ fn probe_system() -> (Vec<String>, String) {
 
 #[cfg(feature = "bundled")]
 fn build_bundled() -> (Vec<String>, String) {
-    let glib = pkg_config::Config::new()
-        .atleast_version("2.68")
-        .probe("glib-2.0")
-        .unwrap_or_else(|e| panic!("bundled libmdbsql requires GLib: {}", e));
-
     let vendor_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("mdbtools");
     let vendor_include = vendor_dir.join("include");
     let generated_include = PathBuf::from(env::var("OUT_DIR").unwrap()).join("include");
     std::fs::create_dir_all(&generated_include).unwrap();
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let is_bsd_libc = matches!(target_os.as_str(), "macos" | "ios" | "freebsd" | "dragonfly");
+    let is_bsd_libc = matches!(
+        target_os.as_str(),
+        "macos" | "ios" | "freebsd" | "dragonfly"
+    );
 
     // Substitutions that mdbtools' configure script performs on mdbtools.h.in
     let header_template = std::fs::read_to_string(vendor_include.join("mdbtools.h.in")).unwrap();
     let header = header_template
         .replace("@HAVE_ICONV_H@", "1")
         .replace("@HAVE_XLOCALE_H@", if is_bsd_libc { "1" } else { "0" })
-        .replace("@GLIB_INCLUDE_HEADER@", "glib.h")
+        .replace("@GLIB_INCLUDE_HEADER@", "mdbfakeglib.h")
         .replace("@LOCALE_T@", "locale_t");
     std::fs::write(generated_include.join("mdbtools.h"), header).unwrap();
 
@@ -57,9 +55,7 @@ fn build_bundled() -> (Vec<String>, String) {
     build
         .include(&generated_include)
         .include(&vendor_include)
-        .includes(&glib.include_paths)
         .define("TLS", "_Thread_local")
-        .define("HAVE_GLIB", "1")
         .define("HAVE_ICONV", "1")
         .define("ICONV_CONST", "")
         .define("HAVE_STRPTIME", "1")
@@ -79,6 +75,7 @@ fn build_bundled() -> (Vec<String>, String) {
         "catalog.c",
         "data.c",
         "dump.c",
+        "fakeglib.c",
         "file.c",
         "iconv.c",
         "index.c",
@@ -97,8 +94,16 @@ fn build_bundled() -> (Vec<String>, String) {
     ];
     let sql_sources = ["mdbsql.c", "parser.c", "lexer.c"];
     build
-        .files(libmdb_sources.iter().map(|file| vendor_dir.join("src/libmdb").join(file)))
-        .files(sql_sources.iter().map(|file| vendor_dir.join("src/sql").join(file)))
+        .files(
+            libmdb_sources
+                .iter()
+                .map(|file| vendor_dir.join("src/libmdb").join(file)),
+        )
+        .files(
+            sql_sources
+                .iter()
+                .map(|file| vendor_dir.join("src/sql").join(file)),
+        )
         .compile("mdbsql");
 
     if matches!(target_os.as_str(), "macos" | "ios") {
@@ -108,7 +113,6 @@ fn build_bundled() -> (Vec<String>, String) {
 
     let include_args = [&generated_include, &vendor_include]
         .into_iter()
-        .chain(&glib.include_paths)
         .map(|path| format!("-I{}", path.to_string_lossy()))
         .collect();
 
