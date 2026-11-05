@@ -268,6 +268,8 @@ impl Mdb {
     }
 
     pub fn schema(&self, table_name: &str) -> Result<String, Error> {
+        let table_name = CString::new(table_name)?;
+
         unsafe {
             let mdb = (*self.0).mdb;
 
@@ -282,8 +284,11 @@ impl Mdb {
     }
 
     pub fn read_table(&self, table_name: &str) -> Result<*mut MdbTableDef, Error> {
+        let c_table_name = CString::new(table_name)?;
+
         unsafe {
-            let table = mdb_read_table_by_name((*self.0).mdb, table_name.as_ptr() as _, MDB_TABLE);
+            let table =
+                mdb_read_table_by_name((*self.0).mdb, c_table_name.as_ptr() as _, MDB_TABLE);
             if table.is_null() {
                 Err(Error::MdbSqlError(format!(
                     "Table {} does not exist in this database.",
