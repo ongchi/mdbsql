@@ -3,8 +3,10 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
-use libc::FILE;
+use libc::{off_t, tm, FILE};
 use std::os::raw::{c_uint, c_void};
+
+pub type iconv_t = *mut c_void;
 
 // Same layout in GLib and in mdbtools' fakeglib
 #[repr(C)]

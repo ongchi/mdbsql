@@ -11,6 +11,8 @@ links = "mdbsql"
 [features]
 default = []
 bundled = ["dep:cc"]
+# Run bindgen for the bundled library instead of using pre-generated bindings
+buildtime_bindgen = []
 
 [build-dependencies]
 bindgen = "0.72"

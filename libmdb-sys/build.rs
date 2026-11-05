@@ -3,11 +3,17 @@ use std::path::PathBuf;
 
 fn main() {
     #[cfg(feature = "bundled")]
-    let (clang_args, version) = build_bundled();
+    let version = {
+        let clang_args = build_bundled();
+        write_bundled_bindings(clang_args);
+        read_vendored_version()
+    };
     #[cfg(not(feature = "bundled"))]
-    let (clang_args, version) = probe_system();
-
-    generate_bindings(clang_args);
+    let version = {
+        let (clang_args, version) = probe_system();
+        generate_bindings(clang_args);
+        version
+    };
 
     // Exposed to dependent build scripts as DEP_MDBSQL_VERSION
     println!("cargo:version={}", version);
@@ -30,8 +36,8 @@ fn probe_system() -> (Vec<String>, String) {
 }
 
 #[cfg(feature = "bundled")]
-fn build_bundled() -> (Vec<String>, String) {
-    let vendor_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("mdbtools");
+fn build_bundled() -> Vec<String> {
+    let vendor_dir = vendor_dir();
     let vendor_include = vendor_dir.join("include");
     let generated_include = PathBuf::from(env::var("OUT_DIR").unwrap()).join("include");
     std::fs::create_dir_all(&generated_include).unwrap();
@@ -111,17 +117,51 @@ fn build_bundled() -> (Vec<String>, String) {
     }
     println!("cargo:rerun-if-changed={}", vendor_dir.display());
 
-    let include_args = [&generated_include, &vendor_include]
+    [&generated_include, &vendor_include]
         .into_iter()
         .map(|path| format!("-I{}", path.to_string_lossy()))
-        .collect();
-
-    (include_args, read_vendored_version(&vendor_include))
+        .collect()
 }
 
 #[cfg(feature = "bundled")]
-fn read_vendored_version(vendor_include: &std::path::Path) -> String {
-    let version_header = std::fs::read_to_string(vendor_include.join("mdbver.h")).unwrap();
+fn vendor_dir() -> PathBuf {
+    PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("mdbtools")
+}
+
+#[cfg(all(feature = "bundled", feature = "buildtime_bindgen"))]
+fn write_bundled_bindings(clang_args: Vec<String>) {
+    generate_bindings(clang_args);
+}
+
+#[cfg(all(feature = "bundled", not(feature = "buildtime_bindgen")))]
+fn write_bundled_bindings(_clang_args: Vec<String>) {
+    let pregenerated = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("src")
+        .join(pregenerated_bindings_name());
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
+    std::fs::copy(&pregenerated, out_path).expect("Couldn't copy pre-generated bindings!");
+    println!("cargo:rerun-if-changed={}", pregenerated.display());
+}
+
+/// Pre-generated bindings are only valid for the target families they were generated for
+#[cfg(all(feature = "bundled", not(feature = "buildtime_bindgen")))]
+fn pregenerated_bindings_name() -> &'static str {
+    let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap();
+    let pointer_width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap();
+
+    if target_family.split(',').any(|family| family == "unix") && pointer_width == "64" {
+        return "bindgen_bundled_unix.rs";
+    }
+    panic!(
+        "No pre-generated libmdb bindings for target {}. Enable the `buildtime_bindgen` feature.",
+        env::var("TARGET").unwrap()
+    );
+}
+
+#[cfg(feature = "bundled")]
+fn read_vendored_version() -> String {
+    let version_header =
+        std::fs::read_to_string(vendor_dir().join("include").join("mdbver.h")).unwrap();
     version_header
         .lines()
         .find_map(|line| line.strip_prefix("#define MDB_VERSION_NO "))
@@ -129,6 +169,7 @@ fn read_vendored_version(vendor_include: &std::path::Path) -> String {
         .expect("MDB_VERSION_NO not found in vendored mdbver.h")
 }
 
+#[cfg(any(not(feature = "bundled"), feature = "buildtime_bindgen"))]
 fn generate_bindings(clang_args: Vec<String>) {
     let bindings = bindgen::Builder::default()
         .clang_args(clang_args)
@@ -142,6 +183,17 @@ fn generate_bindings(clang_args: Vec<String>) {
         .blocklist_type(r".*FILE")
         .blocklist_type(r".*__sFILEX")
         .blocklist_type(r".*__sbuf")
+        // Target-specific system types, defined in lib.rs so that
+        // pre-generated bindings work across targets
+        .blocklist_type(r"tm")
+        .blocklist_type(r"off_t")
+        .blocklist_type(r"fpos_t")
+        .blocklist_type(r"iconv_t")
+        .blocklist_type(r"__.*")
+        .blocklist_type(r"_IO_.*")
+        .blocklist_item(r"MDBTOOLS_H_.*")
+        // Same output whether or not rustfmt is installed
+        .formatter(bindgen::Formatter::Prettyplease)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .trust_clang_mangling(false)
         .generate()

@@ -22,6 +22,7 @@ members = ["libmdb-sys"]
 default = []
 rusqlite = ["dep:rusqlite"]
 bundled = ["libmdb-sys/bundled"]
+buildtime_bindgen = ["libmdb-sys/buildtime_bindgen"]
 
 [build-dependencies]
 version-compare = "0.2"
