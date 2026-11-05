@@ -1,6 +1,6 @@
 # mdbsql
 
-**SQL query for Access database on Unix-like systems.**
+**SQL query for Access database on Unix-like systems and Windows.**
 
 This is a simple wrapper for [libmdbsql](https://github.com/mdbtools/mdbtools) in Rust.
 
@@ -35,7 +35,7 @@ mdbsql = { version = "0.1", features = ["bundled"] }
 | `bundled`, `buildtime_bindgen` | vendored                | bindgen       |
 
 Pre-generated bindings exist for 64-bit Unix targets (macOS, Linux, BSD) and
-`x86_64-pc-windows-gnu`. Windows is supported with `bundled` only.
+`x86_64-pc-windows-gnu`. Windows (MinGW) is supported with `bundled` only.
 
 ### Notes on `bundled`
 

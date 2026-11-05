@@ -1,4 +1,4 @@
-//! SQL query for Access database on Unix-like systems.
+//! SQL query for Access database on Unix-like systems and Windows.
 //!
 //! This is a simple wrapper for [libmdbsql](https://github.com/mdbtools/mdbtools) in Rust.
 //!
