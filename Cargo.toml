@@ -2,7 +2,7 @@
 name = "mdbsql"
 version = "0.1.7"
 edition = "2021"
-description = "SQL query for Access database on Unix-like systems"
+description = "SQL query for Access database on Unix-like systems and Windows"
 readme = "README.md"
 keywords = ["access", "mdb", "database", "ffi"]
 license = "Apache-2.0"
