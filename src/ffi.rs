@@ -331,11 +331,11 @@ impl Mdb {
 
             #[cfg(LIBMDBSQL_GE_VERSION_1)]
             let normalize =
-                |mut name| -> *mut i8 { mdb_normalise_and_replace(mdb, &mut name as _) };
+                |mut name| -> *mut c_char { mdb_normalise_and_replace(mdb, &mut name as _) };
             #[cfg(not(LIBMDBSQL_GE_VERSION_1))]
-            let normalize = |name| -> *mut i8 { name };
+            let normalize = |name| -> *mut c_char { name };
 
-            let quote = |name| -> *mut i8 {
+            let quote = |name| -> *mut c_char {
                 let quote = (*(*mdb).default_backend).quote_schema_name.unwrap();
                 normalize(quote(ptr::null(), name as _))
             };
