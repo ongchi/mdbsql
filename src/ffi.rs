@@ -1,7 +1,6 @@
-use libc::{c_char, c_int, size_t};
+use libc::{c_char, c_int, FILE};
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
 
@@ -20,6 +19,67 @@ use libmdb_sys::mdb_normalise_and_replace;
 use crate::error::Error;
 
 const EXPORT_BIND_SIZE: usize = 200000;
+
+/// Runs `write` with a C stream and returns what it wrote.
+#[cfg(unix)]
+unsafe fn capture_output(write: impl FnOnce(*mut FILE)) -> Result<String, Error> {
+    let mut buf: *mut c_char = ptr::null_mut();
+    let mut buf_size: libc::size_t = 0;
+    let stream = libc::open_memstream(&mut buf, &mut buf_size);
+    if stream.is_null() {
+        return Err(Error::MdbSqlError(
+            "Couldn't open memory stream".to_string(),
+        ));
+    }
+
+    write(stream);
+    libc::fclose(stream);
+
+    let output = CStr::from_ptr(buf).to_str().map(str::to_string);
+    libc::free(buf as _);
+    Ok(output?)
+}
+
+/// Runs `write` with a C stream and returns what it wrote.
+///
+/// Windows has no `open_memstream`, so this uses a temporary file.
+#[cfg(windows)]
+unsafe fn capture_output(write: impl FnOnce(*mut FILE)) -> Result<String, Error> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+    let path = std::env::temp_dir().join(format!(
+        "mdbsql-{}-{}.tmp",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let c_path = CString::new(
+        path.to_str()
+            .ok_or_else(|| Error::InvalidPath(path.clone()))?,
+    )?;
+
+    let stream = libc::fopen(c_path.as_ptr(), c"wb".as_ptr());
+    if stream.is_null() {
+        return Err(Error::MdbSqlError(format!(
+            "Couldn't create temporary file {}",
+            path.display()
+        )));
+    }
+
+    write(stream);
+    libc::fclose(stream);
+
+    let output = std::fs::read(&path);
+    let _ = std::fs::remove_file(&path);
+    let output = output.map_err(|e| {
+        Error::MdbSqlError(format!(
+            "Couldn't read temporary file {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(std::str::from_utf8(&output)?.to_string())
+}
 
 struct PtrArray<T> {
     arr: *mut GPtrArray,
@@ -109,7 +169,16 @@ impl Mdb {
             return Err(Error::InvalidPath(path.to_path_buf()));
         }
 
-        let c_path = CString::new(path.as_os_str().as_bytes())?;
+        #[cfg(unix)]
+        let c_path = {
+            use std::os::unix::ffi::OsStrExt;
+            CString::new(path.as_os_str().as_bytes())?
+        };
+        #[cfg(windows)]
+        let c_path = CString::new(
+            path.to_str()
+                .ok_or_else(|| Error::InvalidPath(path.to_path_buf()))?,
+        )?;
         let c_path = c_path.as_ptr();
 
         unsafe {
@@ -202,19 +271,13 @@ impl Mdb {
         unsafe {
             let mdb = (*self.0).mdb;
 
-            let mut buf: *mut c_char = ptr::null_mut();
-            let mut buf_sizeloc: size_t = 0;
-            let mem_fd = libc::open_memstream(&mut buf, &mut buf_sizeloc);
-
             let table = table_name.as_ptr() as *mut c_char;
             let namespace: *mut c_char = ptr::null_mut();
             let export_opt = MDB_SHEXP_INDEXES | MDB_SHEXP_RELATIONS | MDB_SHEXP_BULK_INSERT;
-            mdb_print_schema(mdb, mem_fd, table, namespace, export_opt);
 
-            libc::fclose(mem_fd);
-            let schema = CStr::from_ptr(buf as _).to_str().unwrap().to_string();
-
-            Ok(schema)
+            capture_output(|mem_fd| {
+                mdb_print_schema(mdb, mem_fd, table, namespace, export_opt);
+            })
         }
     }
 
@@ -261,10 +324,6 @@ impl Mdb {
                 bound_values.push((bind_value, bind_len));
             }
 
-            let mut buf: *mut c_char = ptr::null_mut();
-            let mut buf_sizeloc: size_t = 0;
-            let mem_fd = libc::open_memstream(&mut buf, &mut buf_sizeloc);
-
             #[cfg(LIBMDBSQL_GE_VERSION_1)]
             let normalize =
                 |mut name| -> *mut i8 { mdb_normalise_and_replace(mdb, &mut name as _) };
@@ -276,64 +335,58 @@ impl Mdb {
                 normalize(quote(ptr::null(), name as _))
             };
 
-            while mdb_fetch_row(table) == 1 {
-                let quoted_name = quote((*table).name.as_ptr());
-                libc::fputs(c"INSERT INTO ".as_ptr(), mem_fd);
-                libc::fputs(quoted_name, mem_fd);
-                libc::fputs(c" (".as_ptr(), mem_fd);
-                libc::free(quoted_name as _);
+            capture_output(|mem_fd| {
+                while mdb_fetch_row(table) == 1 {
+                    let quoted_name = quote((*table).name.as_ptr());
+                    libc::fputs(c"INSERT INTO ".as_ptr(), mem_fd);
+                    libc::fputs(quoted_name, mem_fd);
+                    libc::fputs(c" (".as_ptr(), mem_fd);
+                    libc::free(quoted_name as _);
 
-                let cols: PtrArray<MdbColumn> = (*table).columns.into();
+                    let cols: PtrArray<MdbColumn> = (*table).columns.into();
 
-                for (i, c) in cols.into_iter().enumerate() {
-                    if i > 0 {
-                        libc::fputs(c", ".as_ptr(), mem_fd);
-                    }
-                    let quoted_name = (*c).name.as_ptr() as _;
-                    libc::fputs(normalize(quoted_name), mem_fd);
-                }
-
-                libc::fputs(c") VALUES (".as_ptr(), mem_fd);
-
-                for (i, c) in cols.into_iter().enumerate() {
-                    let col_type = (*c).col_type;
-
-                    let (value, length) = if col_type == MDB_OLE as i32 {
-                        let len_ptr = ptr::null_mut();
-                        let bind_ptr = mdb_ole_read_full(mdb, c as _, len_ptr);
-                        (bind_ptr, len_ptr as *mut i32)
-                    } else {
-                        (
-                            bound_values[i].0.as_mut_ptr() as _,
-                            &mut bound_values[i].1 as _,
-                        )
-                    };
-
-                    if i > 0 {
-                        libc::fputs(c",".as_ptr(), mem_fd);
+                    for (i, c) in cols.into_iter().enumerate() {
+                        if i > 0 {
+                            libc::fputs(c", ".as_ptr(), mem_fd);
+                        }
+                        let quoted_name = (*c).name.as_ptr() as _;
+                        libc::fputs(normalize(quoted_name), mem_fd);
                     }
 
-                    mdb_print_col(
-                        mem_fd,
-                        value as _,
-                        quote_text,
-                        col_type,
-                        *length,
-                        c"\"".as_ptr() as _,
-                        ptr::null_mut(),
-                        export_flags,
-                    );
+                    libc::fputs(c") VALUES (".as_ptr(), mem_fd);
+
+                    for (i, c) in cols.into_iter().enumerate() {
+                        let col_type = (*c).col_type;
+
+                        let (value, length) = if col_type == MDB_OLE as i32 {
+                            let len_ptr = ptr::null_mut();
+                            let bind_ptr = mdb_ole_read_full(mdb, c as _, len_ptr);
+                            (bind_ptr, len_ptr as *mut i32)
+                        } else {
+                            (
+                                bound_values[i].0.as_mut_ptr() as _,
+                                &mut bound_values[i].1 as _,
+                            )
+                        };
+
+                        if i > 0 {
+                            libc::fputs(c",".as_ptr(), mem_fd);
+                        }
+
+                        mdb_print_col(
+                            mem_fd,
+                            value as _,
+                            quote_text,
+                            col_type,
+                            *length,
+                            c"\"".as_ptr() as _,
+                            ptr::null_mut(),
+                            export_flags,
+                        );
+                    }
+                    libc::fputs(c");".as_ptr(), mem_fd);
                 }
-                libc::fputs(c");".as_ptr(), mem_fd);
-            }
-
-            libc::fclose(mem_fd);
-
-            let stmt = CStr::from_ptr(buf as _).to_str()?.to_string();
-
-            libc::free(buf as _);
-
-            Ok(stmt)
+            })
         }
     }
 }

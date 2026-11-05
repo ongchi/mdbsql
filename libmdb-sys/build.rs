@@ -47,14 +47,19 @@ fn build_bundled() -> Vec<String> {
         target_os.as_str(),
         "macos" | "ios" | "freebsd" | "dragonfly"
     );
+    // MinGW has no iconv; mdbtools uses the Windows locale API instead
+    let is_windows = target_os == "windows";
 
     // Substitutions that mdbtools' configure script performs on mdbtools.h.in
     let header_template = std::fs::read_to_string(vendor_include.join("mdbtools.h.in")).unwrap();
     let header = header_template
-        .replace("@HAVE_ICONV_H@", "1")
+        .replace("@HAVE_ICONV_H@", if is_windows { "0" } else { "1" })
         .replace("@HAVE_XLOCALE_H@", if is_bsd_libc { "1" } else { "0" })
         .replace("@GLIB_INCLUDE_HEADER@", "mdbfakeglib.h")
-        .replace("@LOCALE_T@", "locale_t");
+        .replace(
+            "@LOCALE_T@",
+            if is_windows { "_locale_t" } else { "locale_t" },
+        );
     std::fs::write(generated_include.join("mdbtools.h"), header).unwrap();
 
     let mut build = cc::Build::new();
@@ -62,12 +67,15 @@ fn build_bundled() -> Vec<String> {
         .include(&generated_include)
         .include(&vendor_include)
         .define("TLS", "_Thread_local")
-        .define("HAVE_ICONV", "1")
-        .define("ICONV_CONST", "")
-        .define("HAVE_STRPTIME", "1")
-        .define("HAVE_FMEMOPEN", "1")
-        .define("HAVE_GMTIME_R", "1")
         .warnings(false);
+    if !is_windows {
+        build
+            .define("HAVE_ICONV", "1")
+            .define("ICONV_CONST", "")
+            .define("HAVE_STRPTIME", "1")
+            .define("HAVE_FMEMOPEN", "1")
+            .define("HAVE_GMTIME_R", "1");
+    }
     if is_bsd_libc {
         build.define("HAVE_REALLOCF", "1");
     }
@@ -152,6 +160,9 @@ fn pregenerated_bindings_name() -> &'static str {
     if target_family.split(',').any(|family| family == "unix") && pointer_width == "64" {
         return "bindgen_bundled_unix.rs";
     }
+    if env::var("TARGET").unwrap() == "x86_64-pc-windows-gnu" {
+        return "bindgen_bundled_windows_gnu.rs";
+    }
     panic!(
         "No pre-generated libmdb bindings for target {}. Enable the `buildtime_bindgen` feature.",
         env::var("TARGET").unwrap()
@@ -191,6 +202,8 @@ fn generate_bindings(clang_args: Vec<String>) {
         .blocklist_type(r"iconv_t")
         .blocklist_type(r"__.*")
         .blocklist_type(r"_IO_.*")
+        .blocklist_type(r"_iobuf")
+        .blocklist_type(r"off(32|64)_t")
         .blocklist_item(r"MDBTOOLS_H_.*")
         // Same output whether or not rustfmt is installed
         .formatter(bindgen::Formatter::Prettyplease)
